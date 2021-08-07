@@ -1,0 +1,6 @@
+PIP GOPHERD.MAP;*/DE
+PIP *.LOG;*/DE
+PIP *.TSK;*/DE
+PIP *.OBJ;*/DE
+PIP *.CRF;*/DE
+PIP *.STB;*/DE

@@ -1,0 +1,115 @@
+
+10	PROGRAM GOPHERD
+
+	%TITLE "GPH$$$"
+	%IDENT "V144"
+
+	!-------------------------------------------------!
+	!         Gopher Server for RSX-11M-PLUS          !
+	!         Version 144  -  Written by KJX          !
+	!-------------------------------------------------!
+	!                                                 !
+	!      This program is in the PUBLIC DOMAIN.      !
+	!   There is no warranty. Use on your own risk.   !
+	!                                                 !
+	!-------------------------------------------------!
+
+	OPTION TYPE=EXPLICIT
+	OPTION CONSTANT TYPE=INTEGER
+
+	%INCLUDE "LB:[1,1]INET"
+	%INCLUDE "LB:[1,1]BQTLIB"
+
+	ON ERROR GOTO 31500
+
+	DECLARE STRING HOSTNAME			!Our hostname
+	DECLARE STRING DOCROOT			!Document root
+	DECLARE STRING REQUEST			!Request from client
+	DECLARE STRING FILENAME			!Requested filename
+	DECLARE STRING FILETYPE			!Extension of file
+	DECLARE STRING HTAB			!Horizontal tab char
+	DECLARE STRING BUF			!I/O buffer
+	DECLARE STRING EP
+	DECLARE WORD   I,J,K
+	DECLARE WORD   CONSTANT NETFD=1%	!Network file-descriptor
+	DECLARE WORD   CONSTANT DSKFD=2%	!Disk file-descriptor
+
+	! Initialize data... if gopherd$host and gopherd$root are
+	! set, we use them. If they are not set, we use sane defaults.
+	HOSTNAME = TRNSLT("GOPHERD$HOST")
+	DOCROOT  = TRNSLT("GOPHERD$ROOT")
+	HOSTNAME = "LILITH"       IF HOSTNAME=""
+	DOCROOT  = "DU1:[GOPHER]" IF DOCROOT=""
+	HTAB = CHR$(9)
+
+	! Create the server-socket.
+	J = SOCKET(1,0)
+	IF J=0 THEN
+	   PRINT "GOPHERD -- Error creating socket, error ";NETERR
+	   GOTO 32000
+	END IF
+
+	! Accept the connection.
+	CALL ACCEPT(NETFD,EP,TCPOPT_TXT,60%)
+	CALL STMO(NETFD,20%)			!Set timeout to 20s
+
+	! Read one line (= 80 characters) from the client.
+	REQUEST = RECV(NETFD,80%)
+
+	! Parse the received line for the requ'd filename.
+	! If there is none, send the index.
+	FILENAME = EDIT$(REQUEST,32%)
+	FILENAME = "INDEX.MAP" IF LEN(REQUEST)<3%
+	K = POS(FILENAME,"/",1%)
+	FILENAME = RIGHT$(FILENAME,K+1%)
+	FILETYPE = RIGHT$(FILENAME,LEN(FILENAME)-3%)
+	FILENAME = DOCROOT + FILENAME
+
+	! Send file to client. Gophermaps get special treatment.
+	! The "infinite loops" end with an I/O error as soon as we
+	! reach the file's EOF - the error handler jumps to 32000.
+	OPEN FILENAME FOR INPUT AS FILE #DSKFD
+	IF FILETYPE <> ".MAP" THEN
+	    WHILE -1
+	        LINPUT #DSKFD,BUF
+	        PRINT #NETFD,BUF
+	    NEXT
+	ELSE
+	    WHILE -1
+	        LINPUT #DSKFD,BUF
+	         J = ASC(LEFT$(BUF,1)) - 48%	!Is this a link?
+	         IF (J < 0) OR (J > 9) THEN	!If yes, add null.host
+	            BUF = "i"+BUF+HTAB+HTAB+"null.host"+HTAB+"1"
+	         ELSE				!If no, add hostname
+	            BUF = BUF+HTAB+HOSTNAME+HTAB+"70"
+	         END IF
+	         PRINT #NETFD,BUF
+	     NEXT
+	END IF
+	
+	! We should never arrive here
+	GOTO 32000
+
+	! Handle errors...
+31500	SELECT ERR
+	CASE 11
+	   RESUME 32000
+	CASE 14
+	   RESUME 32000
+	CASE 47
+	   PRINT #NETFD,"GOPHERD -- Request too long."
+	   RESUME 32000
+	CASE 254
+	   PRINT #NETFD,"GOPHERD -- Timeout while waiting for request."
+	   RESUME 32000
+	CASE ELSE
+	   RESUME 32000
+	END SELECT
+
+	! End gracefully.
+32000	CLOSE #DSKFD
+	CALL PUSH(NETFD)
+	CLOSE #NETFD
+	EXIT PROGRAM
+
+	END
